@@ -1,5 +1,3 @@
-# 重构美化后的最终 streamlit_app.py 内容，带分页、筛选器和错误修复
-final_beautified_code = '''
 import streamlit as st
 import pandas as pd
 import json
@@ -7,24 +5,22 @@ import plotly.express as px
 from matplotlib import rcParams
 import matplotlib.pyplot as plt
 from collections import Counter
-import os
+import os, re, requests
 from wordcloud import WordCloud
-import jieba
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
-import re
 
 rcParams['font.sans-serif'] = ['SimHei']
 st.set_page_config(page_title="保险科技智能分析平台", layout="wide")
 
-# 读取数据
+# ========== 1. 数据加载与处理 ==========
+
 @st.cache_data
 def load_data():
     return pd.read_csv("insurtech_results.csv")
 
 df = load_data()
 
-# 解析 JSON 字段
 def extract_json_fields(df):
     sentiments, opinions, keywords_all, subjects = [], [], [], []
     for raw in df["原始输出"]:
@@ -44,14 +40,15 @@ def extract_json_fields(df):
 
 df["情绪"], df["观点"], all_keywords, df["主体"] = extract_json_fields(df)
 
-# 从正文中提取时间（简单规则）
+# 日期提取
 def extract_date(text):
-    match = re.search(r"(\\d{4}-\\d{2}-\\d{2})", str(text))
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", str(text))
     return match.group(1) if match else None
 
 df["日期"] = df["正文"].apply(extract_date)
 
-# ==== 侧边栏筛选器 ====
+# ========== 2. 侧边栏筛选 ==========
+
 with st.sidebar:
     st.header("🔍 数据筛选器")
     sentiment_options = ["全部"] + sorted(df["情绪"].dropna().unique().tolist())
@@ -59,13 +56,17 @@ with st.sidebar:
     if selected_sentiment != "全部":
         df = df[df["情绪"] == selected_sentiment]
 
-# ==== 页面结构划分 ====
+# ========== 3. 主界面标签结构 ==========
+
 st.title("📊 保险科技行业智能观点分析平台")
 st.markdown("🚀 当前共加载新闻：**{}** 条".format(len(df)))
 st.markdown("---")
 
-tab1, tab2, tab3, tab4 = st.tabs(["📊 情绪与关键词", "🧠 聚类分析", "🏢 公司与时间", "📄 数据总览"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 情绪与关键词", "🧠 聚类分析", "🏢 公司与时间", "🤖 行业智能体", "📄 数据总览"
+])
 
+# ========== 📊 情绪与关键词 ==========
 with tab1:
     st.subheader("📊 情绪分布")
     sentiment_counts = df["情绪"].value_counts().reset_index()
@@ -103,6 +104,7 @@ with tab1:
     else:
         st.warning("⚠️ 未找到可用中文字体，词云将无法显示中文。")
 
+# ========== 🧠 聚类分析 ==========
 with tab2:
     st.subheader("🧠 观点聚类分析")
     vectorizer = TfidfVectorizer(stop_words="english", max_features=100)
@@ -123,6 +125,7 @@ with tab2:
         for text in sample:
             st.markdown(f"- {text}")
 
+# ========== 🏢 公司与时间 ==========
 with tab3:
     st.subheader("📈 情绪随时间变化趋势")
     timeline_df = df.dropna(subset=["日期"])
@@ -156,19 +159,51 @@ with tab3:
     else:
         st.info("未成功提取公司主体")
 
-    st.subheader("🤖 行业智能体建议")
-    st.markdown("提示词示例：")
-    st.code("请分析当前保险科技行业的关键词：智能核保、数字风控、客户体验")
-
+# ========== 🤖 智能体分析 ==========
 with tab4:
+    st.subheader("🤖 行业智能体对话")
+
+    DEEPSEEK_API_KEY = "sk-7b432ed6557d42939e8c52ae59a442c1"
+    API_URL = "https://api.deepseek.com/v1/chat/completions"
+
+    def call_deepseek(user_input):
+        system_context = f"""
+        你是一位保险科技行业的分析专家，具备政策、趋势、技术、投资等方面的知识。
+        当前的关键词包括：{', '.join(top_df['关键词'].tolist()[:10])}。
+        """
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": system_context},
+                {"role": "user", "content": user_input}
+            ],
+            "temperature": 0.7
+        }
+        res = requests.post(API_URL, headers=headers, json=payload)
+        return res.json()["choices"][0]["message"]["content"]
+
+    if "chat" not in st.session_state:
+        st.session_state.chat = []
+
+    user_input = st.text_input("🔎 请输入问题：", "")
+    if user_input:
+        with st.spinner("智能分析中..."):
+            reply = call_deepseek(user_input)
+            st.session_state.chat.append(("用户", user_input))
+            st.session_state.chat.append(("智能体", reply))
+
+    for role, msg in st.session_state.chat:
+        st.chat_message(role).write(msg)
+
+# ========== 📄 数据总览 ==========
+with tab5:
     st.subheader("📄 原始新闻数据总览")
     st.dataframe(df[["标题", "情绪", "链接"]], use_container_width=True)
 
     st.subheader("📥 一键导出报告")
     csv = df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("📥 下载 CSV", csv, file_name="insurtech_analysis.csv", mime="text/csv")
-'''
-
-# 保存为最终优化版文件
-with open("D:/比赛/insurtech/streamlit_app_final_beautified.py", "w", encoding="utf-8") as f:
-    f.write(final_beautified_code)
