@@ -95,7 +95,7 @@ with tab1:
 
     font_path = get_chinese_font()
     if font_path:
-        wordcloud = WordCloud(font_path=font_path, background_color="white", width=800, height=400)
+        wordcloud = WordCloud(font_path="font.ttf", background_color="white", width=800, height=400)
         wordcloud.generate_from_frequencies(kw_freq)
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.imshow(wordcloud, interpolation="bilinear")
