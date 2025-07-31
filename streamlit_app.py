@@ -13,11 +13,12 @@ from sklearn.cluster import KMeans
 rcParams['font.sans-serif'] = ['SimHei']
 st.set_page_config(page_title="保险科技智能分析平台", layout="wide")
 
-# ========== 1. 数据加载与处理 ==========
-
 @st.cache_data
 def load_data():
-    return pd.read_csv("insurtech_results.csv")
+    df = pd.read_csv("insurtech_results.csv")
+    df["原始输出"] = df["原始输出"].fillna("")
+    df["发布时间"] = pd.to_datetime(df["发布时间"], errors="coerce")
+    return df
 
 df = load_data()
 
@@ -39,15 +40,7 @@ def extract_json_fields(df):
     return sentiments, opinions, keywords_all, subjects
 
 df["情绪"], df["观点"], all_keywords, df["主体"] = extract_json_fields(df)
-
-# 日期提取
-def extract_date(text):
-    match = re.search(r"(\d{4}-\d{2}-\d{2})", str(text))
-    return match.group(1) if match else None
-
-df["日期"] = df["正文"].apply(extract_date)
-
-# ========== 2. 侧边栏筛选 ==========
+df["日期"] = df["发布时间"].dt.date
 
 with st.sidebar:
     st.header("🔍 数据筛选器")
@@ -55,8 +48,6 @@ with st.sidebar:
     selected_sentiment = st.selectbox("按情绪筛选", sentiment_options)
     if selected_sentiment != "全部":
         df = df[df["情绪"] == selected_sentiment]
-
-# ========== 3. 主界面标签结构 ==========
 
 st.title("📊 保险科技行业智能观点分析平台")
 st.markdown("🚀 当前共加载新闻：**{}** 条".format(len(df)))
@@ -66,12 +57,12 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 情绪与关键词", "🧠 聚类分析", "🏢 公司与时间", "🤖 行业智能体", "📄 数据总览"
 ])
 
-# ========== 📊 情绪与关键词 ==========
 with tab1:
     st.subheader("📊 情绪分布")
     sentiment_counts = df["情绪"].value_counts().reset_index()
     sentiment_counts.columns = ["情绪", "数量"]
     fig_sentiment = px.pie(sentiment_counts, names="情绪", values="数量", title="情绪占比")
+    fig_sentiment.update_layout(font=dict(family="SimHei", size=14))
     st.plotly_chart(fig_sentiment, use_container_width=True)
 
     st.subheader("🔥 高频关键词 Top20")
@@ -79,6 +70,7 @@ with tab1:
     top_kw = kw_freq.most_common(20)
     top_df = pd.DataFrame(top_kw, columns=["关键词", "出现次数"])
     fig_bar = px.bar(top_df, x="关键词", y="出现次数", text="出现次数")
+    fig_bar.update_layout(font=dict(family="SimHei", size=14))
     st.plotly_chart(fig_bar, use_container_width=True)
 
     st.subheader("☁️ 关键词词云图")
@@ -95,7 +87,7 @@ with tab1:
 
     font_path = get_chinese_font()
     if font_path:
-        wordcloud = WordCloud(font_path="font.ttf", background_color="white", width=800, height=400)
+        wordcloud = WordCloud(font_path=font_path, background_color="white", width=800, height=400)
         wordcloud.generate_from_frequencies(kw_freq)
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.imshow(wordcloud, interpolation="bilinear")
@@ -104,7 +96,6 @@ with tab1:
     else:
         st.warning("⚠️ 未找到可用中文字体，词云将无法显示中文。")
 
-# ========== 🧠 聚类分析 ==========
 with tab2:
     st.subheader("🧠 观点聚类分析")
     vectorizer = TfidfVectorizer(stop_words="english", max_features=100)
@@ -125,14 +116,29 @@ with tab2:
         for text in sample:
             st.markdown(f"- {text}")
 
-# ========== 🏢 公司与时间 ==========
 with tab3:
-    st.subheader("📈 情绪随时间变化趋势")
-    timeline_df = df.dropna(subset=["日期"])
-    trend_data = timeline_df.groupby(["日期", "情绪"]).size().reset_index(name="数量")
-    fig_time = px.line(trend_data, x="日期", y="数量", color="情绪", markers=True,
-                       title="不同情绪报道随时间趋势")
-    st.plotly_chart(fig_time, use_container_width=True)
+    st.subheader("📈 情绪随日期变化趋势（按天聚合）")
+    trend_df = df.dropna(subset=["日期", "情绪"])
+    trend_data = trend_df.groupby(["日期", "情绪"]).size().reset_index(name="数量")
+
+    if not trend_data.empty:
+        fig_time = px.line(
+            trend_data,
+            x="日期",
+            y="数量",
+            color="情绪",
+            markers=True,
+            title="不同情绪报道随时间（日）趋势"
+        )
+        fig_time.update_layout(
+            xaxis_title="日期",
+            yaxis_title="数量",
+            xaxis=dict(tickangle=-45),
+            font=dict(family="SimHei", size=14)
+        )
+        st.plotly_chart(fig_time, use_container_width=True)
+    else:
+        st.info("暂无可用数据绘制趋势图。")
 
     st.subheader("🏢 主体公司情绪分析")
     def extract_entities(df):
@@ -155,11 +161,11 @@ with tab3:
         radar = pivot.loc[top_entities]
         fig_radar = px.line_polar(radar.reset_index(), r=radar.sum(axis=1), theta=radar.index,
                                   line_close=True, title="高频公司/机构情绪关注强度")
+        fig_radar.update_layout(font=dict(family="SimHei", size=14))
         st.plotly_chart(fig_radar, use_container_width=True)
     else:
         st.info("未成功提取公司主体")
 
-# ========== 🤖 智能体分析 ==========
 with tab4:
     st.subheader("🤖 行业智能体对话")
 
@@ -199,7 +205,6 @@ with tab4:
     for role, msg in st.session_state.chat:
         st.chat_message(role).write(msg)
 
-# ========== 📄 数据总览 ==========
 with tab5:
     st.subheader("📄 原始新闻数据总览")
     st.dataframe(df[["标题", "情绪", "链接"]], use_container_width=True)
